@@ -5,6 +5,7 @@ import { FoodColumn } from '@/components/food/FoodColumn';
 import { FoodForm } from '@/components/food/FoodForm';
 import { ConfirmModal } from '@/components/food/ConfirmModal';
 import { LogDrawer } from '@/components/logs/LogDrawer';
+import { StorageSettings } from '@/components/storage/StorageSettings';
 import { useAppStore } from '@/store';
 
 export default function Dashboard() {
@@ -66,6 +67,8 @@ export default function Dashboard() {
       <ConfirmModal />
 
       <LogDrawer />
+
+      <StorageSettings />
     </div>
   );
 }

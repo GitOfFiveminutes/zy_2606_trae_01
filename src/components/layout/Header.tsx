@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, History, ChevronDown, UserPlus } from 'lucide-react';
+import { Plus, History, ChevronDown, UserPlus, Settings } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { Button } from '@/components/common/Button';
-import { getTodayString } from '@/utils/date';
+import { SyncIndicator } from '@/components/storage/SyncIndicator';
 
 export function Header() {
   const {
@@ -11,6 +11,7 @@ export function Header() {
     setCurrentUser,
     toggleFoodForm,
     toggleLogDrawer,
+    toggleStorageSettings,
     addRoommate,
   } = useAppStore();
 
@@ -63,6 +64,16 @@ export function Header() {
           </div>
 
           <div className="flex items-center gap-3">
+            <SyncIndicator />
+
+            <button
+              onClick={() => toggleStorageSettings(true)}
+              className="p-2 rounded-full hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-700"
+              title="存储设置"
+            >
+              <Settings size={18} />
+            </button>
+
             <Button
               variant="secondary"
               size="md"
@@ -185,7 +196,6 @@ export function Header() {
           </div>
         </div>
       </div>
-      <input type="hidden" value={getTodayString()} />
     </header>
   );
 }

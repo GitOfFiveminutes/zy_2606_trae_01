@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Food, OperationLog, Roommate, FoodFormData, ActionType, Stats } from '@/types';
-import { loadFromStorage, saveToStorage } from '@/utils/storage';
+import type { StorageAdapterConfig, StorageProviderType, StorageSyncStatus } from '@/storage';
+import { storageProvider } from '@/storage';
 import { generateId } from '@/utils/id';
 import { calculateFreshness } from '@/utils/date';
 import { DEFAULT_FOODS, DEFAULT_LOGS, DEFAULT_ROOMMATES } from '@/data/mock';
@@ -24,8 +25,10 @@ interface AppState {
   logDrawerOpen: boolean;
   foodFormOpen: boolean;
   confirmData: { food: Food; action: ActionType } | null;
+  storageSettingsOpen: boolean;
+  syncStatus: StorageSyncStatus;
 
-  init: () => void;
+  init: () => Promise<void>;
   setCurrentUser: (name: string) => void;
   setSelectedOwner: (owner: string | 'all') => void;
   toggleLogDrawer: (open?: boolean) => void;
@@ -39,7 +42,20 @@ interface AppState {
   getFilteredFoods: () => Food[];
   getStats: () => Stats;
   getFoodsByStatus: () => { expired: Food[]; expiring: Food[]; fresh: Food[] };
+  toggleStorageSettings: (open?: boolean) => void;
+  switchStorageProvider: (config: StorageAdapterConfig) => Promise<boolean>;
+  testStorageConnection: (config: StorageAdapterConfig) => Promise<boolean>;
+  getStorageConfig: () => StorageAdapterConfig;
 }
+
+const initialSyncStatus: StorageSyncStatus = {
+  loading: false,
+  syncing: false,
+  error: null,
+  lastSyncAt: null,
+  provider: 'local',
+  connected: true,
+};
 
 export const useAppStore = create<AppState>((set, get) => ({
   foods: [],
@@ -50,24 +66,52 @@ export const useAppStore = create<AppState>((set, get) => ({
   logDrawerOpen: false,
   foodFormOpen: false,
   confirmData: null,
+  storageSettingsOpen: false,
+  syncStatus: { ...initialSyncStatus },
 
-  init: () => {
-    const loadedFoods = loadFromStorage<Food[]>('foods', DEFAULT_FOODS).map(migrateFood);
-    const loadedLogs = loadFromStorage<OperationLog[]>('logs', DEFAULT_LOGS);
-    const loadedRoommates = loadFromStorage<Roommate[]>('roommates', DEFAULT_ROOMMATES);
-    const loadedCurrentUser = loadFromStorage<string>('current-user', DEFAULT_ROOMMATES[0].name);
+  init: async () => {
+    set({ syncStatus: { ...initialSyncStatus, loading: true } });
 
-    set({
-      foods: loadedFoods.filter(f => f.status === 'active'),
-      logs: loadedLogs,
-      roommates: loadedRoommates,
-      currentUser: loadedCurrentUser,
-    });
+    try {
+      await storageProvider.init();
+
+      const currentProvider = storageProvider.getProviderType();
+      const connected = storageProvider.isConnected();
+
+      const loadedFoods = await storageProvider.load<Food[]>('foods', DEFAULT_FOODS);
+      const loadedLogs = await storageProvider.load<OperationLog[]>('logs', DEFAULT_LOGS);
+      const loadedRoommates = await storageProvider.load<Roommate[]>('roommates', DEFAULT_ROOMMATES);
+      const loadedCurrentUser = await storageProvider.load<string>('current-user', DEFAULT_ROOMMATES[0].name);
+
+      set({
+        foods: loadedFoods.map(migrateFood).filter(f => f.status === 'active'),
+        logs: loadedLogs,
+        roommates: loadedRoommates,
+        currentUser: loadedCurrentUser,
+        syncStatus: {
+          ...initialSyncStatus,
+          loading: false,
+          provider: currentProvider,
+          connected,
+          lastSyncAt: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error('[Store] 初始化失败:', error);
+      set({
+        syncStatus: {
+          ...initialSyncStatus,
+          loading: false,
+          error: error instanceof Error ? error.message : '初始化失败',
+          connected: false,
+        },
+      });
+    }
   },
 
   setCurrentUser: (name: string) => {
     set({ currentUser: name });
-    saveToStorage('current-user', name);
+    storageProvider.save('current-user', name);
   },
 
   setSelectedOwner: (owner) => {
@@ -104,9 +148,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set((state) => {
       const newFoods = [newFood, ...state.foods];
-      saveToStorage('foods', newFoods);
+      storageProvider.save('foods', newFoods);
       return { foods: newFoods, foodFormOpen: false };
     });
+
+    set((state) => ({
+      syncStatus: {
+        ...state.syncStatus,
+        connected: storageProvider.isConnected(),
+        lastSyncAt: new Date().toISOString(),
+      },
+    }));
   },
 
   handleAction: (foodId, action, operator) => {
@@ -132,14 +184,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     );
     const newLogs = [log, ...state.logs];
 
-    saveToStorage('foods', updatedFoods);
-    saveToStorage('logs', newLogs);
+    storageProvider.save('foods', updatedFoods);
+    storageProvider.save('logs', newLogs);
 
     set({
       foods: updatedFoods.filter(f => f.status === 'active'),
       logs: newLogs,
       confirmData: null,
     });
+
+    set((state) => ({
+      syncStatus: {
+        ...state.syncStatus,
+        connected: storageProvider.isConnected(),
+        lastSyncAt: new Date().toISOString(),
+      },
+    }));
 
     return true;
   },
@@ -159,7 +219,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
 
     const newRoommates = [...state.roommates, newRoommate];
-    saveToStorage('roommates', newRoommates);
+    storageProvider.save('roommates', newRoommates);
     set({ roommates: newRoommates });
   },
 
@@ -207,5 +267,68 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     return { expired, expiring, fresh };
+  },
+
+  toggleStorageSettings: (open) => {
+    set((state) => ({ storageSettingsOpen: open ?? !state.storageSettingsOpen }));
+  },
+
+  switchStorageProvider: async (config: StorageAdapterConfig) => {
+    set((state) => ({
+      syncStatus: { ...state.syncStatus, syncing: true, error: null },
+    }));
+
+    try {
+      const success = await storageProvider.switchProvider(config);
+
+      if (success) {
+        const loadedFoods = await storageProvider.load<Food[]>('foods', DEFAULT_FOODS);
+        const loadedLogs = await storageProvider.load<OperationLog[]>('logs', DEFAULT_LOGS);
+        const loadedRoommates = await storageProvider.load<Roommate[]>('roommates', DEFAULT_ROOMMATES);
+        const loadedCurrentUser = await storageProvider.load<string>('current-user', DEFAULT_ROOMMATES[0].name);
+
+        set({
+          foods: loadedFoods.map(migrateFood).filter(f => f.status === 'active'),
+          logs: loadedLogs,
+          roommates: loadedRoommates,
+          currentUser: loadedCurrentUser,
+          syncStatus: {
+            loading: false,
+            syncing: false,
+            error: null,
+            lastSyncAt: new Date().toISOString(),
+            provider: storageProvider.getProviderType(),
+            connected: storageProvider.isConnected(),
+          },
+        });
+      } else {
+        set((state) => ({
+          syncStatus: {
+            ...state.syncStatus,
+            syncing: false,
+            error: '切换存储方案失败',
+          },
+        }));
+      }
+
+      return success;
+    } catch (error) {
+      set((state) => ({
+        syncStatus: {
+          ...state.syncStatus,
+          syncing: false,
+          error: error instanceof Error ? error.message : '切换失败',
+        },
+      }));
+      return false;
+    }
+  },
+
+  testStorageConnection: async (config: StorageAdapterConfig) => {
+    return storageProvider.testConnection(config);
+  },
+
+  getStorageConfig: () => {
+    return storageProvider.getCurrentConfig();
   },
 }));
