@@ -1,5 +1,4 @@
 import type { StorageAdapter, StorageAdapterConfig, StorageProviderType } from './types';
-import { DEFAULT_REST_CONFIG } from './types';
 import { LocalStorageAdapter } from './local-adapter';
 import { RestApiAdapter } from './rest-adapter';
 import { CachedStorageAdapter } from './cached-adapter';
@@ -9,6 +8,13 @@ const CONFIG_STORAGE_KEY = 'fridge-manager-storage-config';
 class StorageProvider {
   private adapter: StorageAdapter;
   private cachedAdapter: CachedStorageAdapter | null = null;
+  private currentConfig: StorageAdapterConfig = {
+    type: 'local',
+    baseUrl: '',
+    apiKey: '',
+    headers: {},
+    timeout: 0,
+  };
 
   constructor() {
     this.adapter = new LocalStorageAdapter();
@@ -39,6 +45,7 @@ class StorageProvider {
       if (config.type === 'local') {
         this.adapter = new LocalStorageAdapter();
         this.cachedAdapter = null;
+        this.currentConfig = { ...config };
         this.saveConfig(config);
         return true;
       }
@@ -59,6 +66,7 @@ class StorageProvider {
 
         this.adapter = cached;
         this.cachedAdapter = cached;
+        this.currentConfig = { ...config };
         this.saveConfig(config);
         return true;
       }
@@ -86,18 +94,7 @@ class StorageProvider {
   }
 
   getCurrentConfig(): StorageAdapterConfig {
-    if (this.adapter.type === 'local') {
-      return { type: 'local', baseUrl: '', apiKey: '', headers: {}, timeout: 0 };
-    }
-
-    if (this.adapter.type === 'rest-api' && this.cachedAdapter) {
-      const remote = this.cachedAdapter.getAdapter();
-      if (remote instanceof RestApiAdapter) {
-        return remote.getConfig();
-      }
-    }
-
-    return { ...DEFAULT_REST_CONFIG };
+    return { ...this.currentConfig };
   }
 
   async load<T>(key: string, defaultValue: T): Promise<T> {
