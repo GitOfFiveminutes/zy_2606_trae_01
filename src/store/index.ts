@@ -180,7 +180,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
 
     const updatedFoods = state.foods.map(f =>
-      f.id === foodId ? { ...f, status: action === 'consume' ? 'consumed' : 'discarded' as const } : f
+      f.id === foodId ? { ...f, status: (action === 'consume' ? 'consumed' : 'discarded') as const } : f
     );
     const newLogs = [log, ...state.logs];
 
