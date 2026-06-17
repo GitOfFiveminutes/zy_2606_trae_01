@@ -27,4 +27,27 @@ export default defineConfig({
     }), 
     tsconfigPaths()
   ],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    css: false,
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        singleThread: true,
+      },
+    },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      include: [
+        'src/utils/**/*.ts',
+        'src/lib/**/*.ts',
+        'src/storage/**/*.ts',
+        'src/store/**/*.ts',
+        'src/hooks/**/*.ts',
+      ],
+    },
+  },
 })
