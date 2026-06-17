@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Food, OperationLog, Roommate, FoodFormData, ActionType, Stats } from '@/types';
+import type { Food, FoodStatus, OperationLog, Roommate, FoodFormData, ActionType, Stats } from '@/types';
 import type { StorageAdapterConfig, StorageProviderType, StorageSyncStatus } from '@/storage';
 import { storageProvider } from '@/storage';
 import { generateId } from '@/utils/id';
@@ -179,8 +179,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       timestamp: new Date().toISOString(),
     };
 
+    const newStatus: FoodStatus = action === 'consume' ? 'consumed' : 'discarded';
     const updatedFoods = state.foods.map(f =>
-      f.id === foodId ? { ...f, status: (action === 'consume' ? 'consumed' : 'discarded') as const } : f
+      f.id === foodId ? { ...f, status: newStatus } : f
     );
     const newLogs = [log, ...state.logs];
 
