@@ -22,6 +22,7 @@
 - [工具函数](#工具函数)
 - [类型系统](#类型系统)
 - [开发指南](#开发指南)
+- [部署指南](#部署指南)
 
 ---
 
@@ -706,6 +707,544 @@ npm run preview
 | DELETE | `/data/{key}` | - | - | 删除数据 |
 
 认证方式：请求头 `X-API-Key: <your-api-key>`
+
+---
+
+## 部署指南
+
+### 部署架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    部署架构（两种方案）                        │
+│                                                              │
+│  方案一：纯静态部署（默认）                                    │
+│  ┌──────────┐      ┌───────────────────┐                    │
+│  │  Vite    │      │  静态文件服务器     │                    │
+│  │  Build   │ ───► │  (Nginx/Vercel/   │                    │
+│  │  dist/   │      │   GitHub Pages)   │                    │
+│  └──────────┘      └───────────────────┘                    │
+│                           │                                  │
+│                    浏览器 localStorage                       │
+│                    （数据存储）                                │
+│                                                              │
+│  方案二：静态 + 远程存储                                      │
+│  ┌──────────┐      ┌───────────────────┐                    │
+│  │  Vite    │      │  静态文件服务器     │                    │
+│  │  Build   │ ───► │  (Nginx)          │                    │
+│  │  dist/   │      └───────────────────┘                    │
+│  └──────────┘              │                                 │
+│                     浏览器 fetch API                          │
+│                            ▼                                 │
+│                    ┌───────────────┐                         │
+│                    │  REST API     │                         │
+│                    │  后端服务      │                         │
+│                    └───────────────┘                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+本应用为纯前端 SPA，构建产物为静态文件（HTML/CSS/JS），无需服务端运行时。默认使用浏览器 localStorage 存储数据，可选对接 REST API 后端实现多设备同步。
+
+---
+
+### 构建流程
+
+#### 1. 环境准备
+
+```bash
+# 确认 Node.js 版本 ≥ 18
+node -v
+
+# 确认 npm 版本 ≥ 9
+npm -v
+```
+
+#### 2. 安装依赖
+
+```bash
+npm install
+```
+
+#### 3. 构建前检查
+
+```bash
+# TypeScript 类型检查
+npm run check
+
+# ESLint 代码规范检查
+npm run lint
+```
+
+#### 4. 生产构建
+
+```bash
+npm run build
+```
+
+构建流程执行：`tsc -b && vite build`
+
+- `tsc -b`：先执行 TypeScript 编译检查，类型错误时构建中断
+- `vite build`：打包生成生产产物到 `dist/` 目录
+
+#### 5. 构建产物
+
+```
+dist/
+├── index.html              # 入口 HTML
+├── favicon.svg             # 网站图标
+└── assets/
+    ├── index-[hash].css    # 样式文件（Tailwind 编译产物）
+    └── index-[hash].js     # JavaScript 主包（React + 业务代码）
+```
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| `build.sourcemap` | `'hidden'` | 生成隐藏 sourcemap（不暴露源码，但可在报错时定位） |
+| `build.outDir` | `dist`（默认） | 输出目录 |
+| 路由模式 | `HashRouter` | URL 格式 `/#/path`，无需服务端配置 fallback |
+
+> **重要**：由于使用 `HashRouter`，所有路由在客户端解析，无需服务端配置 SPA fallback rewrite 规则。
+
+#### 6. 本地预览构建产物
+
+```bash
+npm run preview
+```
+
+Vite 会在本地启动一个静态文件服务器来预览 `dist/` 目录的内容。
+
+---
+
+### 部署方案一：Nginx（推荐）
+
+适用于自有服务器部署。
+
+#### Nginx 配置
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    # 网站根目录指向构建产物
+    root /var/www/fridge-manager/dist;
+    index index.html;
+
+    # 静态资源缓存（JS/CSS 带有 hash，可长期缓存）
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # HTML 文件不缓存（确保每次获取最新版本）
+    location = /index.html {
+        expires -1;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+
+    # favicon 等静态文件
+    location /favicon.svg {
+        expires 7d;
+        add_header Cache-Control "public";
+    }
+
+    # 所有未匹配路径返回 index.html（HashRouter 下可选，作为兜底）
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Gzip 压缩
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+    gzip_min_length 1024;
+}
+```
+
+#### 部署步骤
+
+```bash
+# 1. 本地构建
+npm run build
+
+# 2. 将 dist/ 目录上传到服务器
+scp -r dist/* user@your-server:/var/www/fridge-manager/dist/
+
+# 3. 在服务器上重载 Nginx
+sudo nginx -t          # 检查配置语法
+sudo nginx -s reload   # 重载配置
+```
+
+#### HTTPS 配置（推荐）
+
+```bash
+# 使用 certbot 申请免费 SSL 证书
+sudo certbot --nginx -d your-domain.com
+```
+
+Certbot 会自动修改 Nginx 配置，将 HTTP 重定向到 HTTPS。
+
+---
+
+### 部署方案二：Vercel
+
+适用于零配置快速部署。
+
+#### 方式 A：通过 Vercel CLI
+
+```bash
+# 1. 安装 Vercel CLI
+npm i -g vercel
+
+# 2. 登录 Vercel
+vercel login
+
+# 3. 部署（首次部署会自动创建项目）
+vercel
+
+# 4. 部署到生产环境
+vercel --prod
+```
+
+#### 方式 B：通过 Git 仓库连接
+
+1. 将代码推送到 GitHub/GitLab
+2. 在 [Vercel Dashboard](https://vercel.com/dashboard) 导入仓库
+3. Framework Preset 选择 `Vite`
+4. Build Command：`npm run build`
+5. Output Directory：`dist`
+6. 点击 Deploy
+
+Vercel 会自动为每次 Git 推送创建预览部署，主分支合并后自动发布到生产环境。
+
+#### 自定义域名
+
+在 Vercel 项目 Settings → Domains 中添加自定义域名，按提示配置 DNS 记录。
+
+---
+
+### 部署方案三：GitHub Pages
+
+适用于开源项目免费托管。
+
+#### 配置步骤
+
+1. 在 [vite.config.ts](file:///d:/trae_projects/zy_2606_trae_01/vite.config.ts) 中添加 `base` 配置：
+
+```typescript
+export default defineConfig({
+  base: '/<仓库名>/',   // 例如 base: '/fridge-manager/'
+  build: {
+    sourcemap: 'hidden',
+  },
+  // ...
+})
+```
+
+2. 创建 `.github/workflows/deploy.yml`：
+
+```yaml
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - uses: actions/deploy-pages@v4
+```
+
+3. 在仓库 Settings → Pages 中将 Source 设置为 `GitHub Actions`
+
+---
+
+### 部署方案四：Docker
+
+适用于容器化部署。
+
+#### Dockerfile
+
+```dockerfile
+# ---- 构建阶段 ----
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run check
+RUN npm run build
+
+# ---- 运行阶段 ----
+FROM nginx:alpine
+
+# 复制构建产物到 Nginx 默认目录
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# 复制 Nginx 配置
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+#### nginx.conf（放置于项目根目录）
+
+```nginx
+server {
+    listen 80;
+    server_name localhost;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location = /index.html {
+        expires -1;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+    gzip_min_length 1024;
+}
+```
+
+#### 构建与运行
+
+```bash
+# 构建镜像
+docker build -t fridge-manager .
+
+# 运行容器
+docker run -d -p 8080:80 --name fridge-manager fridge-manager
+
+# 访问
+# http://localhost:8080
+```
+
+#### docker-compose.yml（可选）
+
+```yaml
+version: '3.8'
+services:
+  web:
+    build: .
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+```
+
+```bash
+docker-compose up -d
+```
+
+---
+
+### 远程存储后端部署（可选）
+
+如果需要多设备数据同步，需部署一个 REST API 后端服务。应用通过 `StorageSettings` 界面配置连接信息。
+
+#### API 接口规范
+
+后端需实现以下 4 个接口：
+
+| 方法 | 路径 | 请求体 | 成功响应 | 说明 |
+|------|------|--------|----------|------|
+| `GET` | `/health` | - | `200 OK` | 健康检查，返回任意 2xx 即可 |
+| `GET` | `/data/{key}` | - | `200 { "data": <value> }` | 读取数据，404 表示无数据 |
+| `PUT` | `/data/{key}` | `{ "data": <value> }` | `200 OK` | 写入/更新数据 |
+| `DELETE` | `/data/{key}` | - | `200 OK` | 删除数据 |
+
+#### 认证机制
+
+- 请求头：`X-API-Key: <your-api-key>`
+- 后端需校验每个请求的 `X-API-Key`，不匹配返回 `401` 或 `403`
+- 应用中检测到 401/403 会提示"授权校验失败"
+
+#### CORS 配置
+
+后端必须配置 CORS 允许前端域名访问：
+
+```
+Access-Control-Allow-Origin: https://your-frontend-domain.com
+Access-Control-Allow-Methods: GET, PUT, DELETE, OPTIONS
+Access-Control-Allow-Headers: Content-Type, X-API-Key
+```
+
+#### 超时配置
+
+| 场景 | 默认超时 | 说明 |
+|------|----------|------|
+| 数据读写 | 10000ms (10s) | 在 `StorageSettings` 中配置 |
+| 连接测试 | 5000ms (5s) | 固定值，见 [rest-adapter.ts](file:///d:/trae_projects/zy_2606_trae_01/src/storage/rest-adapter.ts#L113-L130) |
+
+#### 后端参考实现（Node.js Express）
+
+```javascript
+const express = require('express');
+const app = express();
+app.use(express.json());
+
+const API_KEY = process.env.API_KEY || 'your-secret-key';
+const dataStore = new Map();
+
+function authMiddleware(req, res, next) {
+  if (req.headers['x-api-key'] !== API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
+  res.sendStatus(204);
+});
+
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+app.get('/data/:key', authMiddleware, (req, res) => {
+  const value = dataStore.get(req.params.key);
+  if (value === undefined) return res.sendStatus(404);
+  res.json({ data: value });
+});
+
+app.put('/data/:key', authMiddleware, (req, res) => {
+  dataStore.set(req.params.key, req.body.data);
+  res.json({ ok: true });
+});
+
+app.delete('/data/:key', authMiddleware, (req, res) => {
+  dataStore.delete(req.params.key);
+  res.json({ ok: true });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`API server running on port ${PORT}`));
+```
+
+#### 应用中配置远程存储
+
+部署完成后，在应用界面中操作：
+
+1. 点击 Header 右上角 ⚙️ 设置图标
+2. 选择"REST API"存储方案
+3. 填写 API 地址（如 `https://api.your-domain.com`）
+4. 填写 API Key
+5. 点击"测试连接"确认连通
+6. 点击"应用"切换存储方案
+
+配置保存后，应用启动时会自动恢复上次的存储方案（配置存储在 `localStorage` 的 `fridge-manager-storage-config` 键中）。
+
+---
+
+### 环境变量
+
+当前项目未使用环境变量。如需定制构建，可在 [vite.config.ts](file:///d:/trae_projects/zy_2606_trae_01/vite.config.ts) 中通过 `define` 注入：
+
+```typescript
+export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
+  },
+  // ...
+})
+```
+
+也可使用 `.env` 文件：
+
+| 文件 | 加载时机 | 用途 |
+|------|----------|------|
+| `.env` | 始终加载 | 通用配置 |
+| `.env.local` | 始终加载（被 git 忽略） | 本地覆盖 |
+| `.env.production` | 生产构建时 | 生产环境配置 |
+| `.env.development` | 开发服务器时 | 开发环境配置 |
+
+Vite 环境变量必须以 `VITE_` 前缀才能暴露给客户端代码：
+
+```
+VITE_API_BASE_URL=https://api.example.com
+```
+
+在代码中通过 `import.meta.env.VITE_API_BASE_URL` 访问。
+
+---
+
+### 部署检查清单
+
+| 检查项 | 命令/操作 | 说明 |
+|--------|-----------|------|
+| TypeScript 类型检查 | `npm run check` | 确保无类型错误 |
+| ESLint 检查 | `npm run lint` | 确保代码规范 |
+| 生产构建 | `npm run build` | 确保 dist/ 生成成功 |
+| 构建产物验证 | `npm run preview` | 本地预览生产构建 |
+| 路由测试 | 访问 `/#/` 和 `/#/logs` | 确认页面正常渲染 |
+| localStorage 存储 | 添加食物 → 刷新页面 | 确认数据持久化正常 |
+| REST API 连接（如启用） | 存储设置 → 测试连接 | 确认远程存储可用 |
+| 移动端适配 | 手机浏览器访问 | 确认响应式布局正常 |
+| 浏览器兼容性 | Chrome/Firefox/Safari 测试 | 目标 ES2020，主流浏览器均支持 |
+
+---
+
+### 常见问题
+
+**Q: 部署后页面空白？**
+
+检查 `index.html` 中的资源路径。如部署到子目录（如 GitHub Pages），需在 [vite.config.ts](file:///d:/trae_projects/zy_2606_trae_01/vite.config.ts) 中设置 `base` 选项。
+
+**Q: 刷新页面 404？**
+
+由于使用 `HashRouter`（URL 带 `#`），此问题不应出现。如改用 `BrowserRouter`，需配置服务端 SPA fallback（Nginx: `try_files $uri /index.html`）。
+
+**Q: REST API 连接失败？**
+
+1. 确认后端服务正常运行且 `/health` 接口可访问
+2. 检查 CORS 配置是否允许前端域名
+3. 确认 API Key 是否正确
+4. 应用会自动降级到 localStorage 缓存，数据不会丢失
+
+**Q: 如何清除用户数据？**
+
+在浏览器开发者工具 → Application → Local Storage 中删除 `fridge-manager-` 前缀的所有键。
+
+**Q: 构建产物有多大？**
+
+典型构建产物约 200-400 KB（gzip 后），包含 React 运行时 + 业务代码 + Tailwind CSS。
 
 ### localStorage 键值表
 
