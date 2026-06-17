@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Utensils, Trash2 } from 'lucide-react';
+import { Utensils, Trash2, Lock } from 'lucide-react';
 import type { Food, ActionType } from '@/types';
 import { STORAGE_AREA_LABELS, STORAGE_AREA_ICONS, FRESHNESS_LABELS } from '@/types';
 import { useFreshness } from '@/hooks/useFreshness';
@@ -35,12 +35,12 @@ function getOwnerColor(owner: string) {
 export function FoodCard({ food, index }: FoodCardProps) {
   const [removing, setRemoving] = useState(false);
   const freshness = useFreshness(food.purchaseDate, food.shelfLifeDays);
-  const { openConfirm, roommates } = useAppStore();
+  const { openConfirm, roommates, currentUser, canOperateFood } = useAppStore();
 
-  const ownerColor = getOwnerColor(food.owner);
-  const ownerAvatar = roommates.find(r => r.name === food.owner)?.avatar ?? '👤';
+  const canOperate = canOperateFood(food, currentUser);
 
   const handleAction = (action: ActionType) => {
+    if (!canOperate) return;
     setRemoving(true);
     setTimeout(() => {
       openConfirm(food, action);
@@ -103,10 +103,20 @@ export function FoodCard({ food, index }: FoodCardProps) {
                 <span>{STORAGE_AREA_ICONS[food.storageArea]}</span>
                 {STORAGE_AREA_LABELS[food.storageArea]}
               </Badge>
-              <Badge variant={ownerColor.bg.replace('bg-', '').replace('-100', '') as any || 'default'} className={`${ownerColor.bg} ${ownerColor.text}`}>
-                <span>{ownerAvatar}</span>
-                {food.owner}
-              </Badge>
+              {food.owners.map((ownerName) => {
+                const ownerColor = getOwnerColor(ownerName);
+                const ownerAvatar = roommates.find(r => r.name === ownerName)?.avatar ?? '👤';
+                return (
+                  <Badge
+                    key={ownerName}
+                    variant={ownerColor.bg.replace('bg-', '').replace('-100', '') as any || 'default'}
+                    className={`${ownerColor.bg} ${ownerColor.text}`}
+                  >
+                    <span>{ownerAvatar}</span>
+                    {ownerName}
+                  </Badge>
+                );
+              })}
             </div>
           </div>
           <div className="ml-3 text-right flex-shrink-0">
@@ -124,19 +134,38 @@ export function FoodCard({ food, index }: FoodCardProps) {
         <div className="flex gap-2">
           <button
             onClick={() => handleAction('consume')}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium bg-brand-50 text-brand-700 hover:bg-brand-100 transition-all active:scale-95"
+            disabled={!canOperate}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all active:scale-95',
+              canOperate
+                ? 'bg-brand-50 text-brand-700 hover:bg-brand-100'
+                : 'bg-gray-50 text-gray-400 cursor-not-allowed'
+            )}
           >
-            <Utensils size={16} />
+            {canOperate ? <Utensils size={16} /> : <Lock size={16} />}
             吃掉
           </button>
           <button
             onClick={() => handleAction('discard')}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all active:scale-95"
+            disabled={!canOperate}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all active:scale-95',
+              canOperate
+                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                : 'bg-gray-50 text-gray-400 cursor-not-allowed'
+            )}
+            title={!canOperate ? '只有归属人可以操作' : ''}
           >
-            <Trash2 size={16} />
+            {canOperate ? <Trash2 size={16} /> : <Lock size={16} />}
             丢弃
           </button>
         </div>
+
+        {!canOperate && (
+          <p className="mt-2 text-[11px] text-gray-400 text-center">
+            🔒 仅归属人可操作
+          </p>
+        )}
       </div>
 
       <input type="hidden" value={FRESHNESS_LABELS[freshness.status]} />

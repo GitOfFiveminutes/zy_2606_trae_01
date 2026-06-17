@@ -5,6 +5,16 @@ import { generateId } from '@/utils/id';
 import { calculateFreshness } from '@/utils/date';
 import { DEFAULT_FOODS, DEFAULT_LOGS, DEFAULT_ROOMMATES } from '@/data/mock';
 
+function migrateFood(food: any): Food {
+  if (food.owner && !food.owners) {
+    return { ...food, owners: [food.owner] };
+  }
+  if (!food.owners) {
+    return { ...food, owners: [] };
+  }
+  return food;
+}
+
 interface AppState {
   foods: Food[];
   logs: OperationLog[];
@@ -23,8 +33,9 @@ interface AppState {
   openConfirm: (food: Food, action: ActionType) => void;
   closeConfirm: () => void;
   addFood: (data: FoodFormData) => void;
-  handleAction: (foodId: string, action: ActionType, operator: string) => void;
+  handleAction: (foodId: string, action: ActionType, operator: string) => boolean;
   addRoommate: (name: string) => void;
+  canOperateFood: (food: Food, userName: string) => boolean;
   getFilteredFoods: () => Food[];
   getStats: () => Stats;
   getFoodsByStatus: () => { expired: Food[]; expiring: Food[]; fresh: Food[] };
@@ -41,7 +52,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   confirmData: null,
 
   init: () => {
-    const loadedFoods = loadFromStorage<Food[]>('foods', DEFAULT_FOODS);
+    const loadedFoods = loadFromStorage<Food[]>('foods', DEFAULT_FOODS).map(migrateFood);
     const loadedLogs = loadFromStorage<OperationLog[]>('logs', DEFAULT_LOGS);
     const loadedRoommates = loadFromStorage<Roommate[]>('roommates', DEFAULT_ROOMMATES);
     const loadedCurrentUser = loadFromStorage<string>('current-user', DEFAULT_ROOMMATES[0].name);
@@ -72,6 +83,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openConfirm: (food, action) => {
+    const state = get();
+    if (!state.canOperateFood(food, state.currentUser)) {
+      return;
+    }
     set({ confirmData: { food, action } });
   },
 
@@ -97,7 +112,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   handleAction: (foodId, action, operator) => {
     const state = get();
     const food = state.foods.find(f => f.id === foodId);
-    if (!food) return;
+    if (!food) return false;
+
+    if (!state.canOperateFood(food, operator)) {
+      return false;
+    }
 
     const log: OperationLog = {
       id: generateId(),
@@ -121,6 +140,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       logs: newLogs,
       confirmData: null,
     });
+
+    return true;
   },
 
   addRoommate: (name) => {
@@ -142,10 +163,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ roommates: newRoommates });
   },
 
+  canOperateFood: (food, userName) => {
+    return food.owners.includes(userName);
+  },
+
   getFilteredFoods: () => {
     const state = get();
     if (state.selectedOwner === 'all') return state.foods;
-    return state.foods.filter(f => f.owner === state.selectedOwner);
+    return state.foods.filter(f => f.owners.includes(state.selectedOwner));
   },
 
   getStats: () => {

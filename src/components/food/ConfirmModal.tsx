@@ -55,7 +55,7 @@ export function ConfirmModal() {
               <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                 <span>{STORAGE_AREA_ICONS[food.storageArea]} {STORAGE_AREA_LABELS[food.storageArea]}</span>
                 <span>·</span>
-                <span>归属: {food.owner}</span>
+                <span>归属: {food.owners.join('、')}</span>
               </div>
             </div>
           </div>

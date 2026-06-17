@@ -12,7 +12,7 @@ export interface Food {
   purchaseDate: string;
   shelfLifeDays: number;
   storageArea: StorageArea;
-  owner: string;
+  owners: string[];
   status: FoodStatus;
   createdAt: string;
 }
@@ -37,7 +37,7 @@ export interface FoodFormData {
   purchaseDate: string;
   shelfLifeDays: number;
   storageArea: StorageArea;
-  owner: string;
+  owners: string[];
 }
 
 export interface FreshnessInfo {

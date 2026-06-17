@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Package, Calendar, Clock, MapPin, User } from 'lucide-react';
+import { Package, Calendar, Clock, MapPin, Users, Check } from 'lucide-react';
 import type { FoodFormData, StorageArea } from '@/types';
 import { STORAGE_AREA_LABELS } from '@/types';
 import { useAppStore } from '@/store';
@@ -20,7 +20,7 @@ export function FoodForm({ open, onClose }: FoodFormProps) {
     purchaseDate: getTodayString(),
     shelfLifeDays: 7,
     storageArea: 'fridge',
-    owner: currentUser,
+    owners: [currentUser],
   };
 
   const [formData, setFormData] = useState<FoodFormData>(initialData);
@@ -29,7 +29,7 @@ export function FoodForm({ open, onClose }: FoodFormProps) {
 
   useEffect(() => {
     if (open) {
-      setFormData({ ...initialData, owner: currentUser });
+      setFormData({ ...initialData, owners: [currentUser] });
       setErrors({});
     }
   }, [open, currentUser]);
@@ -53,8 +53,8 @@ export function FoodForm({ open, onClose }: FoodFormProps) {
       newErrors.shelfLifeDays = '保质期过长，请检查';
     }
 
-    if (!formData.owner) {
-      newErrors.owner = '请选择归属人';
+    if (!formData.owners || formData.owners.length === 0) {
+      newErrors.owners = '请至少选择一个归属人';
     }
 
     setErrors(newErrors);
@@ -80,6 +80,18 @@ export function FoodForm({ open, onClose }: FoodFormProps) {
     setFormData(prev => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: undefined }));
+    }
+  };
+
+  const toggleOwner = (name: string) => {
+    setFormData(prev => {
+      const newOwners = prev.owners.includes(name)
+        ? prev.owners.filter(o => o !== name)
+        : [...prev.owners, name];
+      return { ...prev, owners: newOwners };
+    });
+    if (errors.owners) {
+      setErrors(prev => ({ ...prev, owners: undefined }));
     }
   };
 
@@ -178,22 +190,38 @@ export function FoodForm({ open, onClose }: FoodFormProps) {
 
         <div>
           <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
-            <User size={16} className="text-brand-500" />
-            归属人
+            <Users size={16} className="text-brand-500" />
+            归属人 (可多选)
           </label>
-          <select
-            value={formData.owner}
-            onChange={(e) => updateField('owner', e.target.value)}
-            className={`select-base ${errors.owner ? 'border-danger-400 focus:ring-danger-400' : ''}`}
-          >
-            {roommates.map(roommate => (
-              <option key={roommate.name} value={roommate.name}>
-                {roommate.avatar} {roommate.name}
-              </option>
-            ))}
-          </select>
-          {errors.owner && (
-            <p className="mt-1 text-xs text-danger-500">{errors.owner}</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {roommates.map(roommate => {
+              const selected = formData.owners.includes(roommate.name);
+              return (
+                <button
+                  key={roommate.name}
+                  type="button"
+                  onClick={() => toggleOwner(roommate.name)}
+                  className={`relative flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 transition-all ${
+                    selected
+                      ? 'border-brand-500 bg-brand-50 text-brand-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  <span className={`w-7 h-7 rounded-full ${roommate.color} flex items-center justify-center text-sm text-white flex-shrink-0`}>
+                    {roommate.avatar}
+                  </span>
+                  <span className="text-sm font-medium truncate">{roommate.name}</span>
+                  {selected && (
+                    <span className="absolute top-1 right-1 w-4 h-4 bg-brand-500 rounded-full flex items-center justify-center">
+                      <Check size={10} className="text-white" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {errors.owners && (
+            <p className="mt-1 text-xs text-danger-500">{errors.owners}</p>
           )}
         </div>
 
